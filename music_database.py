@@ -25,10 +25,9 @@ class MusicDatabase:
         if not is_table_exists:
             self.cursor.execute(
                 f"CREATE TABLE IF NOT EXISTS {self.table_name}(title, track_id, album_id, telegram_message_send)")
-            self.cursor.execute(f"CREATE UNIQUE INDEX index_title ON {self.table_name}(track_id)")
 
     def insert_to_table(self, music_data: List[Tuple[str, int, int, bool]]) -> None:
-        self.cursor.executemany(f"INSERT OR IGNORE INTO {self.table_name} VALUES(?, ?, ?, ?)", music_data)
+        self.cursor.executemany(f"INSERT INTO {self.table_name} VALUES(?, ?, ?, ?)", music_data)
         self.connection.commit()
 
     def get_track_by_album(self, album_id) -> List[Dict[str, int]]:

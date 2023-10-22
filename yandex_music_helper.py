@@ -1,8 +1,7 @@
 import asyncio
 import logging
 from argparse import ArgumentParser
-from typing import Union, List
-
+from typing import Union, List, Tuple
 import telegram
 import yaml
 from retrying import retry
@@ -18,7 +17,7 @@ logging.basicConfig(handlers=(file_log, console_out),
                     datefmt='%d.%m.%Y %H:%M:%S',
                     level=logging.INFO)
 
-TELEGRAM_BOT_MESSAGE_PREFIX = "New unavailable music found! For playlist {} \n \n"
+TELEGRAM_BOT_MESSAGE_PREFIX = "❗️ New unavailable music found ❗️️ \nCount: {}\nPlaylist «{}» \n \n"
 
 
 class YandexMusicHelper:
@@ -34,8 +33,8 @@ class YandexMusicHelper:
         playlist_owner_name = self.config['owner_name']
         db = MusicDatabase(self.config)
         logging.info(f'Getting tracks of playlist #{playlist_index}, owner={playlist_owner_name}')
-        playlist_tracks = await self.call_function(self.get_album_tracks, playlist_index, playlist_owner_name,
-                                                   search_unavailable=True)
+        playlist_title, playlist_tracks = await self.call_function(self.get_album, playlist_index, playlist_owner_name,
+                                                                   search_unavailable=True)
         if playlist_tracks:
             data = []
             new_unavailable_tracks = []
@@ -49,7 +48,9 @@ class YandexMusicHelper:
                 logging.info(f'Fetching done! Found {len(playlist_tracks)} new unavailable tracks.')
                 db.insert_to_table(data)
                 async with bot:
-                    message = TELEGRAM_BOT_MESSAGE_PREFIX.format(playlist_index) + "\n".join(new_unavailable_tracks)
+                    message = TELEGRAM_BOT_MESSAGE_PREFIX.format(
+                        len(new_unavailable_tracks), playlist_title) + "\n".join(
+                        new_unavailable_tracks)
                     if len(message) > 4096:
                         for x in range(0, len(message), 4096):
                             await bot.send_message(text=message[x:x + 4096],
@@ -75,11 +76,11 @@ class YandexMusicHelper:
                     f"{type(e).__name__}, trying to repeat action after 3 seconds. Attempts left = {max_tries}.")
                 await asyncio.sleep(3)
 
-    async def get_album_tracks(self, album_id: int, owner_name: str, search_unavailable=False) -> Union[
-        List[Track], List[str]]:
-        playlist_tracks = await self.call_function((await self.async_client).users_playlists, album_id, owner_name)
+    async def get_album(self, album_id: int, owner_name: str, search_unavailable=False) -> Tuple[str, Union[
+        List[Track], List[str]]]:
+        playlist = await self.call_function((await self.async_client).users_playlists, album_id, owner_name)
         track_list = []
-        for track in playlist_tracks.tracks:
+        for track in playlist.tracks:
             full_track = await self.call_function(track.fetch_track_async)
             if full_track.available and not search_unavailable:
                 track_list.append(full_track)
@@ -87,7 +88,7 @@ class YandexMusicHelper:
                 track_name = self.get_track_fullname(full_track)
                 track_list.append((track_name, int(full_track.id)))
 
-        return track_list
+        return playlist.title, track_list
 
     def get_track_fullname(self, track: Track) -> str:
         title = track.title
@@ -104,7 +105,8 @@ class YandexMusicHelper:
 
 async def async_main(params):
     """create three class instances and run do_work"""
-    await asyncio.gather(*(YandexMusicHelper(params).search_unavailable_songs(playlist) for playlist in params.playlists))
+    await asyncio.gather(
+        *(YandexMusicHelper(params).search_unavailable_songs(playlist) for playlist in params.playlists))
 
 
 def get_parsed_args():
@@ -118,4 +120,4 @@ def get_parsed_args():
 
 if __name__ == '__main__':
     args = get_parsed_args()
-    asyncio.get_event_loop().run_until_complete(async_main(args))
+    asyncio.run(async_main(args))
