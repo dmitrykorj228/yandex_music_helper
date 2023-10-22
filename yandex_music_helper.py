@@ -3,9 +3,12 @@ import logging
 from argparse import ArgumentParser
 from typing import Union, List
 
+import telegram
 import yaml
 from retrying import retry
 from yandex_music import ClientAsync, Track
+
+from music_database import MusicDatabase
 
 file_log = logging.FileHandler('log.log')
 console_out = logging.StreamHandler()
@@ -15,23 +18,50 @@ logging.basicConfig(handlers=(file_log, console_out),
                     datefmt='%d.%m.%Y %H:%M:%S',
                     level=logging.INFO)
 
+TELEGRAM_BOT_MESSAGE_PREFIX = "New unavailable music found! For playlist {} \n \n"
+
 
 class YandexMusicHelper:
     def __init__(self, config_params):
         self.config = yaml.full_load(open("config.yaml", "r"))[config_params.username]
+        self.telegram_config = self.config['telegram']
         self.async_client = self.get_async_client()
 
     async def get_async_client(self):
         return await ClientAsync(self.config['token']).init()
 
-    async def search_unavailable_songs(self):
-        playlists = self.config['playlists']
+    async def search_unavailable_songs(self, playlist_index):
         playlist_owner_name = self.config['owner_name']
-        for playlist_index in playlists:
-            logging.info(f'Getting tracks of playlist #{playlist_index}, owner={playlist_owner_name}')
-            playlist_tracks = await self.call_function(self.get_album_tracks, playlist_index, playlist_owner_name,
-                                                       search_unavailable=True)
-            logging.info(f'Fetching done! Found {len(playlist_tracks)} unavailable tracks.')
+        db = MusicDatabase(self.config)
+        logging.info(f'Getting tracks of playlist #{playlist_index}, owner={playlist_owner_name}')
+        playlist_tracks = await self.call_function(self.get_album_tracks, playlist_index, playlist_owner_name,
+                                                   search_unavailable=True)
+        if playlist_tracks:
+            data = []
+            new_unavailable_tracks = []
+            db_tracks = db.get_track_by_album(playlist_index)
+            for track, track_id in playlist_tracks:
+                if track_id not in db_tracks:
+                    new_unavailable_tracks.append(track)
+                    data.append((track, track_id, playlist_index, False))
+            bot = telegram.Bot(self.telegram_config['token'])
+            if new_unavailable_tracks:
+                logging.info(f'Fetching done! Found {len(playlist_tracks)} new unavailable tracks.')
+                db.insert_to_table(data)
+                async with bot:
+                    message = TELEGRAM_BOT_MESSAGE_PREFIX.format(playlist_index) + "\n".join(new_unavailable_tracks)
+                    if len(message) > 4096:
+                        for x in range(0, len(message), 4096):
+                            await bot.send_message(text=message[x:x + 4096],
+                                                   chat_id=self.telegram_config['chat_id'])
+                    else:
+                        await bot.send_message(text=message,
+                                               chat_id=self.telegram_config['chat_id'])
+
+            else:
+                logging.info('Fetching done! New unavailable tracks not found.')
+        else:
+            logging.error(f"Playlist {playlist_index} doesn't contain tracks!")
 
     @retry(stop_max_attempt_number=10)
     async def call_function(self, func, *args, **kwargs):
@@ -55,7 +85,7 @@ class YandexMusicHelper:
                 track_list.append(full_track)
             elif not full_track.available and search_unavailable:
                 track_name = self.get_track_fullname(full_track)
-                track_list.append(track_name)
+                track_list.append((track_name, int(full_track.id)))
 
         return track_list
 
@@ -74,13 +104,15 @@ class YandexMusicHelper:
 
 async def async_main(params):
     """create three class instances and run do_work"""
-    await asyncio.gather(*([YandexMusicHelper(params).search_unavailable_songs()]))
+    await asyncio.gather(*(YandexMusicHelper(params).search_unavailable_songs(playlist) for playlist in params.playlists))
 
 
 def get_parsed_args():
     parser = ArgumentParser(description='YandexMusic. Unavailable music finder')
     parser.add_argument("-u", "--username", type=str, required=True,
                         help='Username in configfile')
+    parser.add_argument("-p", "--playlists", nargs="*", type=int, required=True,
+                        help='Playlists list')
     return parser.parse_args()
 
 
