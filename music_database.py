@@ -6,7 +6,7 @@ from typing import Tuple, List, Dict
 class MusicDatabase:
     def __init__(self, config):
         self.config = config
-        self.table_owner_name = self.config['owner_name']
+        self.table_owner_name = self.config['owner_name'].replace(".", "")
         self.connection = sqlite3.connect(f"unavailable_songs[{self.table_owner_name}].db")
         self.__prepare_table()
 
