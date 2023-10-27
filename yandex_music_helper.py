@@ -1,6 +1,9 @@
 import asyncio
 import logging
+import os
+import shutil
 from argparse import ArgumentParser
+from pathlib import Path
 from typing import Union, List, Tuple
 import telegram
 import yaml
@@ -8,6 +11,8 @@ from retrying import retry
 from yandex_music import ClientAsync, Track
 
 from music_database import MusicDatabase
+from utils.file import zip_folder
+from youtube_to_mp3_downloader import get_mp3_from_video
 
 file_log = logging.FileHandler('log.log')
 console_out = logging.StreamHandler()
@@ -16,53 +21,69 @@ logging.basicConfig(handlers=(file_log, console_out),
                     format='[%(asctime)s | %(levelname)s]: %(message)s',
                     datefmt='%d.%m.%Y %H:%M:%S',
                     level=logging.INFO)
-
+DOWNLOADED_MUSIC_FOLDER_TEMPLATE = "downloaded_tracks_{}"
 TELEGRAM_BOT_MESSAGE_PREFIX = "❗️ New unavailable music found ❗️️ \nCount: {}\nPlaylist «{}» \n \n"
+MAX_TELEGRAM_MESSAGE_LENGTH = 4096
 
 
 class YandexMusicHelper:
     def __init__(self, config_params):
-        self.config = yaml.full_load(open("config.yaml", "r"))[config_params.username]
-        self.telegram_config = self.config['telegram']
+        self.config = yaml.full_load(open("config.yaml", "r"))
+        self.telegram_bot_config = self.config['TelegramBot']
+        self.user_config = self.config[config_params.username]
         self.async_client = self.get_async_client()
+        self.download_path = Path(
+            os.getcwd(), DOWNLOADED_MUSIC_FOLDER_TEMPLATE.format(self.user_config['playlist_owner_name']))
 
     async def get_async_client(self):
-        return await ClientAsync(self.config['token']).init()
+        return await ClientAsync(self.user_config['auth_token']).init()
 
     async def search_unavailable_songs(self, playlist_index):
-        playlist_owner_name = self.config['owner_name']
-        db = MusicDatabase(self.config)
+        playlist_owner_name = self.user_config['playlist_owner_name']
+        db = MusicDatabase(self.user_config)
         logging.info(f'Getting tracks of playlist #{playlist_index}, owner={playlist_owner_name}')
         playlist_title, playlist_tracks = await self.call_function(self.get_album, playlist_index, playlist_owner_name,
                                                                    search_unavailable=True)
-        if playlist_tracks:
-            data = []
-            new_unavailable_tracks = []
-            db_tracks = db.get_track_by_album(playlist_index)
-            for track, track_id in playlist_tracks:
-                if track_id not in db_tracks:
-                    new_unavailable_tracks.append(track)
-                    data.append((track, track_id, playlist_index, False))
-            bot = telegram.Bot(self.telegram_config['token'])
-            if new_unavailable_tracks:
-                logging.info(f'Fetching done! Found {len(playlist_tracks)} new unavailable tracks.')
-                db.insert_to_table(data)
-                async with bot:
-                    message = TELEGRAM_BOT_MESSAGE_PREFIX.format(
-                        len(new_unavailable_tracks), playlist_title) + "\n".join(
-                        new_unavailable_tracks)
-                    if len(message) > 4096:
-                        for x in range(0, len(message), 4096):
-                            await bot.send_message(text=message[x:x + 4096],
-                                                   chat_id=self.telegram_config['chat_id'])
-                    else:
-                        await bot.send_message(text=message,
-                                               chat_id=self.telegram_config['chat_id'])
-
-            else:
-                logging.info('Fetching done! New unavailable tracks not found.')
-        else:
+        if not playlist_tracks:
             logging.error(f"Playlist {playlist_index} doesn't contain tracks!")
+            return
+
+        data = []
+        new_unavailable_tracks = []
+        db_tracks = db.get_track_by_album(playlist_index)
+        for track, track_id in playlist_tracks:
+            if track_id not in db_tracks:
+                new_unavailable_tracks.append(track)
+                data.append((track, track_id, playlist_index, False))
+        bot = telegram.Bot(self.telegram_bot_config['token'])
+        if new_unavailable_tracks:
+            zip_path = None
+            logging.info(f'Fetching done! Found {len(playlist_tracks)} new unavailable tracks.')
+            db.insert_to_table(data)
+            downloaded_count = get_mp3_from_video(new_unavailable_tracks, output_path=str(self.download_path))
+            if downloaded_count:
+                zip_path = zip_folder(Path(Path(os.getcwd()), f"downloaded_tracks_{playlist_owner_name}"),
+                                      playlist_owner_name)
+            async with bot:
+                message = TELEGRAM_BOT_MESSAGE_PREFIX.format(
+                    len(new_unavailable_tracks), playlist_title) + "\n".join(
+                    new_unavailable_tracks)
+                if len(message) > MAX_TELEGRAM_MESSAGE_LENGTH:
+                    for x in range(0, len(message), MAX_TELEGRAM_MESSAGE_LENGTH):
+                        await bot.send_message(text=message[x:x + MAX_TELEGRAM_MESSAGE_LENGTH],
+                                               chat_id=self.user_config['telegram_chat_id'])
+                else:
+
+                    await bot.send_message(text=message,
+                                           chat_id=self.user_config['telegram_chat_id'])
+                if zip_path:
+                    for file in zip_path.rglob('*'):
+                        await bot.send_document(self.user_config['telegram_chat_id'], document=file)
+                    shutil.rmtree(self.download_path)
+                    shutil.rmtree(zip_path)
+
+        else:
+            logging.info('Fetching done! New unavailable tracks not found.')
 
     @retry(stop_max_attempt_number=10)
     async def call_function(self, func, *args, **kwargs):
