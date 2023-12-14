@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import platform
 import shutil
 from argparse import ArgumentParser
 from pathlib import Path
@@ -9,6 +10,7 @@ import telegram
 import yaml
 from retrying import retry
 from yandex_music import ClientAsync, Track
+from yandex_music.exceptions import InvalidBitrateError
 
 from music_database import MusicDatabase
 from utils.file import zip_folder
@@ -24,6 +26,8 @@ logging.basicConfig(handlers=(file_log, console_out),
 DOWNLOADED_MUSIC_FOLDER_TEMPLATE = "downloaded_tracks_{}"
 TELEGRAM_BOT_MESSAGE_PREFIX = "❗️ New unavailable music found ❗️️ \nCount: {}\nPlaylist «{}» \n \n"
 MAX_TELEGRAM_MESSAGE_LENGTH = 4096
+
+REMOVE_FILENAME_SYMBOLS = {"|", "/", "\\", "<", ">", "+", "\"", ":", "?", "*"}
 
 
 class YandexMusicHelper:
@@ -85,6 +89,25 @@ class YandexMusicHelper:
         else:
             logging.info('Fetching done! New unavailable tracks not found.')
 
+    async def download_playlist(self, playlist_id: int):
+        playlist_owner_name = self.user_config['playlist_owner_name']
+        logging.info(f'Getting tracks of playlist #{playlist_id}, owner={playlist_owner_name}')
+        playlist_title, playlist_tracks = await self.call_function(self.get_album, playlist_id, playlist_owner_name,
+                                                                   search_unavailable=False)
+        if not playlist_tracks:
+            logging.error(f"Playlist {playlist_id} doesn't contain tracks!")
+            return
+        Path(self.user_config['save_path'], str(playlist_id)).mkdir(parents=True, exist_ok=True)
+        for track in playlist_tracks:
+            track_filename = await self.get_track_fullname(track, str(playlist_id))
+            try:
+                await self.call_function(track.download_async, track_filename, bitrate_in_kbps=320)
+                logging.info(f"Successfully downloaded: {track_filename}")
+            except InvalidBitrateError:
+                logging.warning(f"Unfortunately, 320kbps is not available for: {track_filename}")
+                await self.call_function(track.download_async, track_filename)
+                logging.info(f"Successfully downloaded with 192kbps: {track_filename}")
+
     @retry(stop_max_attempt_number=10)
     async def call_function(self, func, *args, **kwargs):
         max_tries = 10
@@ -92,10 +115,13 @@ class YandexMusicHelper:
             try:
                 return await func(*args, **kwargs)
             except Exception as e:
-                max_tries -= 1
-                logging.warning(
-                    f"{type(e).__name__}, trying to repeat action after 3 seconds. Attempts left = {max_tries}.")
-                await asyncio.sleep(3)
+                if isinstance(e, InvalidBitrateError):
+                    break
+                else:
+                    max_tries -= 1
+                    logging.warning(
+                        f"{type(e).__name__}, trying to repeat action after 3 seconds. Attempts left = {max_tries}.")
+                    await asyncio.sleep(3)
 
     async def get_album(self, album_id: int, owner_name: str, search_unavailable=False) -> Tuple[str, Union[
         List[Track], List[str]]]:
@@ -111,27 +137,38 @@ class YandexMusicHelper:
 
         return playlist.title, track_list
 
-    def get_track_fullname(self, track: Track) -> str:
+    async def get_track_fullname(self, track: Track, playlist_id: str) -> str:
         title = track.title
-        if len(track.artists) > 1:
-            artists_name = ", ".join([artist.name for artist in track.artists])
-            title = f"{artists_name} - {track.title}"
-        else:
-            title = f"{track.artists[0].name} - {title}"
-        if track.version:
-            title = f"{title} ({track.version})"
-        full_name = title
-        return full_name
+        uploaded_track = True
+        if ".mp3" not in track.title:
+            uploaded_track = False
+            if len(track.artists) > 1:
+                artists_name = ", ".join([artist.name for artist in track.artists])
+                title = f"{artists_name} - {track.title}"
+            elif track.artists:
+                title = f"{track.artists[0].name} - {title}"
+            if track.version:
+                title = f"{title} ({track.version})"
+        for char in REMOVE_FILENAME_SYMBOLS:
+            title = title.replace(char, "")
+        save_path = str(Path(self.user_config['save_path'], playlist_id, title))
+        return save_path if uploaded_track else f"{save_path}.mp3"
 
 
 async def async_main(params):
     """create three class instances and run do_work"""
-    await asyncio.gather(
-        *(YandexMusicHelper(params).search_unavailable_songs(playlist) for playlist in params.playlists))
+    if params.action.lower() == "download":
+        await asyncio.gather(
+            *(YandexMusicHelper(params).download_playlist(playlist) for playlist in params.playlists))
+    else:
+        await asyncio.gather(
+            *(YandexMusicHelper(params).search_unavailable_songs(playlist) for playlist in params.playlists))
 
 
 def get_parsed_args():
     parser = ArgumentParser(description='YandexMusic. Unavailable music finder')
+    parser.add_argument("-a", "--action", type=str, required=True,
+                        help='Select action [unavailable, download]')
     parser.add_argument("-u", "--username", type=str, required=True,
                         help='Username in configfile')
     parser.add_argument("-p", "--playlists", nargs="*", type=int, required=True,
@@ -141,4 +178,6 @@ def get_parsed_args():
 
 if __name__ == '__main__':
     args = get_parsed_args()
+    if platform.system().lower() == 'windows':
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(async_main(args))
