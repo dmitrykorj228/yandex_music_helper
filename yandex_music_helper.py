@@ -97,9 +97,9 @@ class YandexMusicHelper:
         if not playlist_tracks:
             logging.error(f"Playlist {playlist_id} doesn't contain tracks!")
             return
-        Path(self.user_config['save_path'], str(playlist_id)).mkdir(parents=True, exist_ok=True)
+        Path(self.user_config['save_path'], playlist_title).mkdir(parents=True, exist_ok=True)
         for track in playlist_tracks:
-            track_filename = await self.get_track_fullname(track, str(playlist_id))
+            track_filename = await self.get_track_fullname(track, str(playlist_title))
             try:
                 await self.call_function(track.download_async, track_filename, bitrate_in_kbps=320)
                 logging.info(f"Successfully downloaded: {track_filename}")
