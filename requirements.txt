@@ -1,0 +1,5 @@
+yandex-music==2.1.0
+PyYAML==6.0.1
+telegram==0.0.1
+yt_dlp==2023.10.13
+youtube-search==2.1.2

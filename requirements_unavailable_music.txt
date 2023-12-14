@@ -1,6 +1,0 @@
-yandex-music==2.1.0
-PyYAML==6.0.1
-pytube==15.0.0
-youtube-search==2.1.2
-yt-dlp
-retrying
