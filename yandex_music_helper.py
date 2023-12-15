@@ -106,11 +106,13 @@ class YandexMusicHelper:
                 continue
             try:
                 await self.call_function(track.download_async, track_filename, bitrate_in_kbps=320)
-                logging.info(f"Successfully downloaded: {track_filename}")
+                if Path(track_filename).exists():
+                    logging.info(f"Successfully downloaded: {track_filename}")
             except InvalidBitrateError:
-                logging.warning(f"Unfortunately, 320kbps is not available for: {track_filename} (trying 192kbps)")
+                logging.info(f"Unfortunately, 320kbps is not available for: {track_filename} (trying 192kbps)")
                 await self.call_function(track.download_async, track_filename)
-                logging.info(f"Successfully downloaded with 192kbps: {track_filename}")
+                if Path(track_filename).exists():
+                    logging.info(f"Successfully downloaded with 192kbps: {track_filename}")
 
             # cover_image = track_filename.replace(".mp3", ".png")
             # await track.download_cover_async(cover_image)
