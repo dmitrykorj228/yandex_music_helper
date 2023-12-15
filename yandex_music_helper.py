@@ -114,9 +114,13 @@ class YandexMusicHelper:
                 if Path(track_filename).exists():
                     logging.info(f"Successfully downloaded with 192kbps: {track_filename}")
 
-            # cover_image = track_filename.replace(".mp3", ".png")
-            # await track.download_cover_async(cover_image)
-            # self.set_front_cover(track_filename, cover_image)
+            if track.cover_uri:
+                cover_image = track_filename.replace(".mp3", ".png")
+                await self.call_function(track.download_cover_async, cover_image)
+                self.set_front_cover(track_filename, cover_image)
+            else:
+                cover_image = str(Path(os.getcwd(), "default_front_cover.png"))
+                self.set_front_cover(track_filename, cover_image, unlink=False)
 
     @retry(stop_max_attempt_number=10)
     async def call_function(self, func, *args, **kwargs):
@@ -166,7 +170,7 @@ class YandexMusicHelper:
         save_path = str(Path(self.user_config['save_path'], playlist_id, title))
         return save_path if uploaded_track else f"{save_path}.mp3"
 
-    def set_front_cover(self, audio_filepath: str, cover_image: str) -> None:
+    def set_front_cover(self, audio_filepath: str, cover_image: str, unlink=True) -> None:
         """
         Sets the front cover image of an audio file.
 
@@ -182,7 +186,8 @@ class YandexMusicHelper:
         audiofile.initTag()
         audiofile.tag.images.set(ImageFrame.FRONT_COVER, open(cover_image, 'rb').read(), 'image/png')
         audiofile.tag.save()
-        Path(cover_image).unlink()
+        if unlink:
+            Path(cover_image).unlink()
 
 
 async def async_main(params):
