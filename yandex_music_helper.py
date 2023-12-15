@@ -91,7 +91,7 @@ class YandexMusicHelper:
 
     async def download_playlist(self, playlist_id: int):
         playlist_owner_name = self.user_config['playlist_owner_name']
-        logging.info(f'Getting tracks of playlist #{playlist_id}, owner={playlist_owner_name}')
+        logging.info(f'Fetching tracks of playlist #{playlist_id}, owner={playlist_owner_name}')
         playlist_title, playlist_tracks = await call_function(self.get_album, playlist_id, playlist_owner_name,
                                                               search_unavailable=False)
         if not playlist_tracks:
