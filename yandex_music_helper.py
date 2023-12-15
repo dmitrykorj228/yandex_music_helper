@@ -3,21 +3,20 @@ import logging
 import os
 import platform
 import shutil
-import eyed3
 import telegram
 import yaml
 from argparse import ArgumentParser
 from pathlib import Path
 from typing import Union, List, Tuple
-from retrying import retry
 from yandex_music import ClientAsync, Track
-from yandex_music.exceptions import InvalidBitrateError, TimedOutError
-from eyed3.id3.frames import ImageFrame
+from yandex_music.exceptions import InvalidBitrateError
 from music_database import MusicDatabase
+from tag_editor import TagEditor
 from utils.file import zip_folder
+from utils.wrappers import call_function
 from youtube_to_mp3_downloader import get_mp3_from_video
 
-file_log = logging.FileHandler('log.log')
+file_log = logging.FileHandler('log.log', 'w', 'utf-8')
 console_out = logging.StreamHandler()
 
 logging.basicConfig(handlers=(file_log, console_out),
@@ -47,8 +46,8 @@ class YandexMusicHelper:
         playlist_owner_name = self.user_config['playlist_owner_name']
         db = MusicDatabase(self.user_config)
         logging.info(f'Getting tracks of playlist #{playlist_index}, owner={playlist_owner_name}')
-        playlist_title, playlist_tracks = await self.call_function(self.get_album, playlist_index, playlist_owner_name,
-                                                                   search_unavailable=True)
+        playlist_title, playlist_tracks = await call_function(self.get_album, playlist_index, playlist_owner_name,
+                                                              search_unavailable=True)
         if not playlist_tracks:
             logging.error(f"Playlist {playlist_index} doesn't contain tracks!")
             return
@@ -93,58 +92,37 @@ class YandexMusicHelper:
     async def download_playlist(self, playlist_id: int):
         playlist_owner_name = self.user_config['playlist_owner_name']
         logging.info(f'Getting tracks of playlist #{playlist_id}, owner={playlist_owner_name}')
-        playlist_title, playlist_tracks = await self.call_function(self.get_album, playlist_id, playlist_owner_name,
-                                                                   search_unavailable=False)
+        playlist_title, playlist_tracks = await call_function(self.get_album, playlist_id, playlist_owner_name,
+                                                              search_unavailable=False)
         if not playlist_tracks:
             logging.error(f"Playlist {playlist_id} doesn't contain tracks!")
             return
         Path(self.user_config['save_path'], playlist_title).mkdir(parents=True, exist_ok=True)
         for track in playlist_tracks:
-            track_filename = await self.get_track_fullname(track, str(playlist_title))
-            if Path(track_filename).exists():
-                logging.info(f"File already exists: {track_filename}")
+            track_fullname = self.get_track_fullname(track)
+            track_filepath = str(Path(self.user_config['save_path'], str(playlist_title), track_fullname))
+
+            if Path(track_filepath).exists():
+                logging.info(f"[{playlist_title}] File already exists: {track_fullname}")
                 continue
             try:
-                await self.call_function(track.download_async, track_filename, bitrate_in_kbps=320)
-                if Path(track_filename).exists():
-                    logging.info(f"Successfully downloaded: {track_filename}")
+                await call_function(track.download_async, track_filepath, bitrate_in_kbps=320)
+                if Path(track_filepath).exists():
+                    logging.info(f"[{playlist_title}] Downloaded: {track_fullname}")
             except InvalidBitrateError:
-                logging.info(f"Unfortunately, 320kbps is not available for: {track_filename} (trying 192kbps)")
-                await self.call_function(track.download_async, track_filename)
-                if Path(track_filename).exists():
-                    logging.info(f"Successfully downloaded with 192kbps: {track_filename}")
+                logging.info(f"Unfortunately, 320kbps is not available for: {track_fullname} (trying 192kbps)")
+                await call_function(track.download_async, track_filepath)
+                if Path(track_filepath).exists():
+                    logging.info(f"[{playlist_title}] Downloaded (192kbps): {track_fullname}")
 
-            if track.cover_uri:
-                cover_image = track_filename.replace(".mp3", ".png")
-                await self.call_function(track.download_cover_async, cover_image)
-                self.set_front_cover(track_filename, cover_image)
-            else:
-                cover_image = str(Path(os.getcwd(), "default_front_cover.png"))
-                self.set_front_cover(track_filename, cover_image, unlink=False)
-
-    @retry(stop_max_attempt_number=10)
-    async def call_function(self, func, *args, **kwargs):
-        max_tries = 10
-        while max_tries > 0:
-            try:
-                return await func(*args, **kwargs)
-            except Exception as e:
-                if isinstance(e, InvalidBitrateError):
-                    raise InvalidBitrateError
-                elif isinstance(e, TimedOutError):
-                    max_tries -= 1
-                    logging.warning(
-                        f"{type(e).__name__}, trying to repeat action after 3 seconds. Attempts left = {max_tries}.")
-                    await asyncio.sleep(3)
-                else:
-                    logging.error(str(e))
+            await TagEditor.set_tags(track, track_filepath)
 
     async def get_album(self, album_id: int, owner_name: str, search_unavailable=False) -> Tuple[str, Union[
         List[Track], List[str]]]:
-        playlist = await self.call_function((await self.async_client).users_playlists, album_id, owner_name)
+        playlist = await call_function((await self.async_client).users_playlists, album_id, owner_name)
         track_list = []
         for track in playlist.tracks:
-            full_track = await self.call_function(track.fetch_track_async)
+            full_track = await call_function(track.fetch_track_async)
             if full_track.available and not search_unavailable:
                 track_list.append(full_track)
             elif not full_track.available and search_unavailable:
@@ -153,7 +131,8 @@ class YandexMusicHelper:
 
         return playlist.title, track_list
 
-    async def get_track_fullname(self, track: Track, playlist_id: str) -> str:
+    @staticmethod
+    def get_track_fullname(track: Track) -> str:
         title = track.title
         uploaded_track = True
         if ".mp3" not in track.title:
@@ -167,27 +146,7 @@ class YandexMusicHelper:
                 title = f"{title} ({track.version})"
         for char in REMOVE_FILENAME_SYMBOLS:
             title = title.replace(char, "")
-        save_path = str(Path(self.user_config['save_path'], playlist_id, title))
-        return save_path if uploaded_track else f"{save_path}.mp3"
-
-    def set_front_cover(self, audio_filepath: str, cover_image: str, unlink=True) -> None:
-        """
-        Sets the front cover image of an audio file.
-
-        :param audio_filepath: The filepath of the audio file.
-        :type audio_filepath: str
-        :param cover_image: The filepath of the cover image file.
-        :type cover_image: str
-        :return: None
-        """
-
-        eyed3.log.setLevel("ERROR")
-        audiofile = eyed3.load(audio_filepath)
-        audiofile.initTag()
-        audiofile.tag.images.set(ImageFrame.FRONT_COVER, open(cover_image, 'rb').read(), 'image/png')
-        audiofile.tag.save()
-        if unlink:
-            Path(cover_image).unlink()
+        return title if uploaded_track else f"{title}.mp3"
 
 
 async def async_main(params):
