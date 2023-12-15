@@ -3,3 +3,5 @@ PyYAML==6.0.1
 telegram==0.0.1
 yt_dlp==2023.10.13
 youtube-search==2.1.2
+retrying
+eyed3==0.9.7

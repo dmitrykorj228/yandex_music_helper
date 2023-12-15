@@ -3,15 +3,16 @@ import logging
 import os
 import platform
 import shutil
+import eyed3
+import telegram
+import yaml
 from argparse import ArgumentParser
 from pathlib import Path
 from typing import Union, List, Tuple
-import telegram
-import yaml
 from retrying import retry
 from yandex_music import ClientAsync, Track
-from yandex_music.exceptions import InvalidBitrateError
-
+from yandex_music.exceptions import InvalidBitrateError, TimedOutError
+from eyed3.id3.frames import ImageFrame
 from music_database import MusicDatabase
 from utils.file import zip_folder
 from youtube_to_mp3_downloader import get_mp3_from_video
@@ -100,6 +101,9 @@ class YandexMusicHelper:
         Path(self.user_config['save_path'], playlist_title).mkdir(parents=True, exist_ok=True)
         for track in playlist_tracks:
             track_filename = await self.get_track_fullname(track, str(playlist_title))
+            if Path(track_filename).exists():
+                logging.info(f"File already exists: {track_filename}")
+                continue
             try:
                 await self.call_function(track.download_async, track_filename, bitrate_in_kbps=320)
                 logging.info(f"Successfully downloaded: {track_filename}")
@@ -107,6 +111,10 @@ class YandexMusicHelper:
                 logging.warning(f"Unfortunately, 320kbps is not available for: {track_filename}")
                 await self.call_function(track.download_async, track_filename)
                 logging.info(f"Successfully downloaded with 192kbps: {track_filename}")
+
+            # cover_image = track_filename.replace(".mp3", ".png")
+            # await track.download_cover_async(cover_image)
+            # self.set_front_cover(track_filename, cover_image)
 
     @retry(stop_max_attempt_number=10)
     async def call_function(self, func, *args, **kwargs):
@@ -117,11 +125,13 @@ class YandexMusicHelper:
             except Exception as e:
                 if isinstance(e, InvalidBitrateError):
                     break
-                else:
+                elif isinstance(e, TimedOutError):
                     max_tries -= 1
                     logging.warning(
                         f"{type(e).__name__}, trying to repeat action after 3 seconds. Attempts left = {max_tries}.")
                     await asyncio.sleep(3)
+                else:
+                    logging.error(str(e))
 
     async def get_album(self, album_id: int, owner_name: str, search_unavailable=False) -> Tuple[str, Union[
         List[Track], List[str]]]:
@@ -154,9 +164,26 @@ class YandexMusicHelper:
         save_path = str(Path(self.user_config['save_path'], playlist_id, title))
         return save_path if uploaded_track else f"{save_path}.mp3"
 
+    def set_front_cover(self, audio_filepath: str, cover_image: str) -> None:
+        """
+        Sets the front cover image of an audio file.
+
+        :param audio_filepath: The filepath of the audio file.
+        :type audio_filepath: str
+        :param cover_image: The filepath of the cover image file.
+        :type cover_image: str
+        :return: None
+        """
+
+        eyed3.log.setLevel("ERROR")
+        audiofile = eyed3.load(audio_filepath)
+        audiofile.initTag()
+        audiofile.tag.images.set(ImageFrame.FRONT_COVER, open(cover_image, 'rb').read(), 'image/png')
+        audiofile.tag.save()
+        Path(cover_image).unlink()
+
 
 async def async_main(params):
-    """create three class instances and run do_work"""
     if params.action.lower() == "download":
         await asyncio.gather(
             *(YandexMusicHelper(params).download_playlist(playlist) for playlist in params.playlists))
