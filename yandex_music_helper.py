@@ -108,7 +108,7 @@ class YandexMusicHelper:
                 await self.call_function(track.download_async, track_filename, bitrate_in_kbps=320)
                 logging.info(f"Successfully downloaded: {track_filename}")
             except InvalidBitrateError:
-                logging.warning(f"Unfortunately, 320kbps is not available for: {track_filename}")
+                logging.warning(f"Unfortunately, 320kbps is not available for: {track_filename} (trying 192kbps)")
                 await self.call_function(track.download_async, track_filename)
                 logging.info(f"Successfully downloaded with 192kbps: {track_filename}")
 
@@ -124,7 +124,7 @@ class YandexMusicHelper:
                 return await func(*args, **kwargs)
             except Exception as e:
                 if isinstance(e, InvalidBitrateError):
-                    break
+                    raise InvalidBitrateError
                 elif isinstance(e, TimedOutError):
                     max_tries -= 1
                     logging.warning(
