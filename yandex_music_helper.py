@@ -30,6 +30,7 @@ MAX_TELEGRAM_MESSAGE_LENGTH = 4096
 REMOVE_FILENAME_SYMBOLS = {"|", "/", "\\", "<", ">", "+", "\"", ":", "?", "*"}
 MAX_FILE_NAME_LENGTH_WINDOWS = 255
 
+
 class YandexMusicHelper:
     def __init__(self, config_params):
         self.config = yaml.full_load(open("config.yaml", "r"))
@@ -117,7 +118,11 @@ class YandexMusicHelper:
                 if Path(track_filepath).exists():
                     logging.info(f"[{playlist_title}] Downloaded (192kbps): {track_fullname}")
 
-            await TagEditor.set_tags(track, track_filepath)
+            if track.cover_uri:
+                cover_image = await call_function(track.download_cover_bytes_async)
+            else:
+                cover_image = str(Path(os.getcwd(), 'default_front_cover.png'))
+            TagEditor.set_all_tags(track, track_filepath, cover_image)
 
     async def get_album(self, album_id: int, owner_name: str, search_unavailable=False) -> Tuple[str, Union[
         List[Track], List[str]]]:

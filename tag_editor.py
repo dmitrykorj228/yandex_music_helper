@@ -1,11 +1,7 @@
-import os
-from pathlib import Path
-
 import eyed3
+from eyed3.core import Date
 from eyed3.id3.frames import ImageFrame
 from yandex_music import Track
-
-from utils.wrappers import call_function
 
 eyed3.log.setLevel("ERROR")
 
@@ -13,31 +9,52 @@ eyed3.log.setLevel("ERROR")
 class TagEditor:
 
     @staticmethod
-    async def set_tags(track: Track, track_fullname: str) -> None:
-        if track.cover_uri:
-            cover_image = track_fullname.replace(".mp3", ".png")
-            await call_function(track.download_cover_async, cover_image)
-            TagEditor.set_front_cover(track_fullname, cover_image)
-        else:
-            cover_image = str(Path(os.getcwd(), "default_front_cover.png"))
-            TagEditor.set_front_cover(track_fullname, cover_image, unlink=False)
-
-    @staticmethod
-    def set_front_cover(audio_filepath: str, cover_image: str, unlink=True) -> None:
-        """
-        Sets the front cover image of an audio file.
-
-        :param audio_filepath: The file path of the audio file.
-        :type audio_filepath: str
-        :param cover_image: The file path of the cover image.
-        :type cover_image: str
-        :param unlink: Whether to unlink the cover image file after setting it. Defaults to True.
-        :type unlink: bool, optional
-        :return: None
-        """
+    def set_all_tags(track: Track, audio_filepath: str, cover_image) -> None:
         audiofile = eyed3.load(audio_filepath)
-        audiofile.initTag()
-        audiofile.tag.images.set(ImageFrame.FRONT_COVER, open(cover_image, 'rb').read(), 'image/png')
+        audiofile.initTag(version=(2, 3, 0))
+
+        # SET TITLE SONG
+        track_title = track.title
+        if track.filename and not track.artists:
+            track_title = track_title.split(" - ")[1].replace(".mp3", "")
+        else:
+            track_title = f"{track_title} ({track.version})" if track.version else track_title
+        audiofile.tag.title = track_title
+
+        # SET ARTIST NAME
+        if track.artists:
+            artist_tag = f"{track.artists[0].name}"
+        elif len(track.artists) > 1:
+            artists_name = ", ".join([artist.name for artist in track.artists])
+            artist_tag = f"{artists_name}"
+        else:
+            artist_tag = track.title.split(" - ")[0]
+        audiofile.tag.artist = artist_tag
+
+        # SET FRONT COVER
+        if not isinstance(cover_image, bytes):
+            cover_image = open(cover_image, 'rb').read()
+        audiofile.tag.images.set(ImageFrame.FRONT_COVER, cover_image, 'image/png')
+
+        # SET ICON, ASK ??
+        # img = Image.open(io.BytesIO(cover_image))
+        # img = img.resize((32, 32))
+        # img_byte_arr = io.BytesIO()
+        # img.save(img_byte_arr, format='PNG')
+        # audiofile.tag.images.set(ImageFrame.ICON, cover_image, 'image/png')
+
+        # SET ALBUM THINGS
+        if len(track.albums) > 0:
+            album = track.albums[0]
+            audiofile.tag.album = album.title
+            if album.year:
+                audiofile.tag.recording_date = Date(album.year)
+            if album.genre:
+                audiofile.tag.genre = album.genre
+            if album.track_position:
+                audiofile.tag.track_num = album.track_position.index
+
+        else:
+            audiofile.tag.album = "No album"
+
         audiofile.tag.save()
-        if unlink:
-            Path(cover_image).unlink()
