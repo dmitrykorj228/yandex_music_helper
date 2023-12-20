@@ -28,7 +28,7 @@ TELEGRAM_BOT_MESSAGE_PREFIX = "❗️ New unavailable music found ❗️️ \nCo
 MAX_TELEGRAM_MESSAGE_LENGTH = 4096
 
 REMOVE_FILENAME_SYMBOLS = {"|", "/", "\\", "<", ">", "+", "\"", ":", "?", "*"}
-
+MAX_FILE_NAME_LENGTH_WINDOWS = 255
 
 class YandexMusicHelper:
     def __init__(self, config_params):
@@ -146,6 +146,8 @@ class YandexMusicHelper:
                 title = f"{title} ({track.version})"
         for char in REMOVE_FILENAME_SYMBOLS:
             title = title.replace(char, "")
+        if len(title) > MAX_FILE_NAME_LENGTH_WINDOWS - 4:
+            title = title[:MAX_FILE_NAME_LENGTH_WINDOWS - 4]
         return title if uploaded_track else f"{title}.mp3"
 
 
