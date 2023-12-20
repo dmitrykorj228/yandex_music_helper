@@ -1,7 +1,7 @@
-TelegramBot:
-  token:
-YourName:
+ExampleName:
   auth_token:
   playlist_owner_name:
-  telegram_chat_id:
   save_path: D:\music_test
+  telegram_bot_token: bot_token
+  telegram_chat_id: chat_id
+  unavailable_song_upload_telegram: False

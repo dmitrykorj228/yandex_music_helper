@@ -34,7 +34,6 @@ MAX_FILE_NAME_LENGTH_WINDOWS = 255
 class YandexMusicHelper:
     def __init__(self, config_params):
         self.config = yaml.full_load(open("config.yaml", "r"))
-        self.telegram_bot_config = self.config['TelegramBot']
         self.user_config = self.config[config_params.username]
         self.async_client = self.get_async_client()
         self.download_path = Path(
@@ -60,15 +59,16 @@ class YandexMusicHelper:
             if track_id not in db_tracks:
                 new_unavailable_tracks.append(track)
                 data.append((track, track_id, playlist_index, False))
-        bot = telegram.Bot(self.telegram_bot_config['token'])
         if new_unavailable_tracks:
+            bot = telegram.Bot(self.user_config['telegram_bot_token'])
             zip_path = None
             logging.info(f'Fetching done! Found {len(playlist_tracks)} new unavailable tracks.')
             db.insert_to_table(data)
-            downloaded_count = get_mp3_from_video(new_unavailable_tracks, output_path=str(self.download_path))
-            if downloaded_count:
-                zip_path = zip_folder(Path(Path(os.getcwd()), f"downloaded_tracks_{playlist_owner_name}"),
-                                      playlist_owner_name)
+            if self.user_config['unavailable_song_upload_telegram']:
+                downloaded_count = get_mp3_from_video(new_unavailable_tracks, output_path=str(self.download_path))
+                if downloaded_count:
+                    zip_path = zip_folder(Path(Path(os.getcwd()), f"downloaded_tracks_{playlist_owner_name}"),
+                                          playlist_owner_name)
             async with bot:
                 message = TELEGRAM_BOT_MESSAGE_PREFIX.format(
                     len(new_unavailable_tracks), playlist_title) + "\n".join(
@@ -81,7 +81,7 @@ class YandexMusicHelper:
 
                     await bot.send_message(text=message,
                                            chat_id=self.user_config['telegram_chat_id'])
-                if zip_path:
+                if self.user_config['unavailable_song_upload_telegram'] and zip_path:
                     for file in zip_path.rglob('*'):
                         await bot.send_document(self.user_config['telegram_chat_id'], document=file)
                     shutil.rmtree(self.download_path)
