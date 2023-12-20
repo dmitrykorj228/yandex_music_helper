@@ -101,6 +101,8 @@ class YandexMusicHelper:
         for track in playlist_tracks:
             track_fullname = self.get_track_fullname(track)
             track_filepath = str(Path(self.user_config['save_path'], str(playlist_title), track_fullname))
+            if len(track_filepath) > MAX_FILE_NAME_LENGTH_WINDOWS - 4:
+                track_filepath = track_filepath[:MAX_FILE_NAME_LENGTH_WINDOWS - 4] + ".mp3"
 
             if Path(track_filepath).exists():
                 logging.info(f"[{playlist_title}] File already exists: {track_fullname}")
@@ -146,8 +148,6 @@ class YandexMusicHelper:
                 title = f"{title} ({track.version})"
         for char in REMOVE_FILENAME_SYMBOLS:
             title = title.replace(char, "")
-        if len(title) > MAX_FILE_NAME_LENGTH_WINDOWS - 4:
-            title = title[:MAX_FILE_NAME_LENGTH_WINDOWS - 4]
         return title if uploaded_track else f"{title}.mp3"
 
 
