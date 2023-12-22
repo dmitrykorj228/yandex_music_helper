@@ -100,6 +100,8 @@ class YandexMusicHelper:
         if not playlist_tracks:
             logging.error(f"Playlist {playlist_id} doesn't contain tracks!")
             return
+        success_downloaded = []
+        already_exists_tracks = []
         logging.info(f'Fetching done! Found {len(playlist_tracks)} available tracks of playlist #{playlist_id}')
         logging.info(f'Starting download to {self.user_config["save_path"]}')
 
@@ -113,11 +115,13 @@ class YandexMusicHelper:
             if Path(track_filepath).exists():
                 if self.user_config['download_action_settings']['logging']['file_exists']:
                     logging.info(f"[{playlist_title}] File already exists: {track_fullname}")
+                already_exists_tracks.append(track_fullname)
                 continue
             try:
                 await call_function(track.download_async, track_filepath, bitrate_in_kbps=320)
                 if Path(track_filepath).exists():
                     logging.info(f"[{playlist_title}] Downloaded: {track_fullname}")
+                    success_downloaded.append(track_fullname)
             except InvalidBitrateError:
                 logging.info(f"Unfortunately, 320kbps is not available for: {track_fullname} (trying 192kbps)")
                 await call_function(track.download_async, track_filepath)
@@ -129,6 +133,10 @@ class YandexMusicHelper:
             else:
                 cover_image = str(Path(os.getcwd(), 'default_front_cover.png'))
             TagEditor.set_all_tags(track, track_filepath, cover_image)
+        if success_downloaded:
+            exist_message = f"Already exists: {len(already_exists_tracks)} tracks\n" if already_exists_tracks else ""
+            logging.info(
+                f"Successfully downloaded: {len(success_downloaded)} out of {len(playlist_tracks)}. {exist_message}")
 
     async def get_album(self, album_id: int, owner_name: str, search_unavailable=False) -> Tuple[str, Union[
         List[Track], List[str]]]:
