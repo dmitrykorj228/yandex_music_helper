@@ -100,6 +100,9 @@ class YandexMusicHelper:
         if not playlist_tracks:
             logging.error(f"Playlist {playlist_id} doesn't contain tracks!")
             return
+        logging.info(f'Fetching done! Found {len(playlist_tracks)} available tracks of playlist #{playlist_id}')
+        logging.info(f'Starting download to {self.user_config["save_path"]}')
+
         Path(self.user_config['save_path'], playlist_title).mkdir(parents=True, exist_ok=True)
         for track in playlist_tracks:
             track_fullname = self.get_track_fullname(track)
@@ -108,7 +111,7 @@ class YandexMusicHelper:
                 track_filepath = track_filepath[:MAX_FILE_NAME_LENGTH_WINDOWS - 4] + ".mp3"
 
             if Path(track_filepath).exists():
-                if self.user_config['download_action_settings']['logging']['log_file_exists']:
+                if self.user_config['download_action_settings']['logging']['file_exists']:
                     logging.info(f"[{playlist_title}] File already exists: {track_fullname}")
                 continue
             try:
