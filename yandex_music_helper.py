@@ -64,7 +64,7 @@ class YandexMusicHelper:
             zip_path = None
             logging.info(f'Fetching done! Found {len(playlist_tracks)} new unavailable tracks.')
             db.insert_to_table(data)
-            if self.user_config['search_unavailable_action_settings']['unavailable_song_upload_telegram']:
+            if self.user_config['search_unavailable_action_settings']['upload_zip_to_telegram']:
                 downloaded_count = get_mp3_from_video(new_unavailable_tracks, output_path=str(self.download_path))
                 if downloaded_count:
                     zip_path = zip_folder(Path(Path(os.getcwd()), f"downloaded_tracks_{playlist_owner_name}"),
@@ -82,7 +82,7 @@ class YandexMusicHelper:
                     await bot.send_message(text=message,
                                            chat_id=self.user_config['telegram_chat_id'])
                 if self.user_config['search_unavailable_action_settings'][
-                    'unavailable_song_upload_telegram'] and zip_path:
+                    'upload_zip_to_telegram'] and zip_path:
                     for file in zip_path.rglob('*'):
                         await bot.send_document(
                             self.user_config['search_unavailable_action_settings']['telegram_chat_id'], document=file)

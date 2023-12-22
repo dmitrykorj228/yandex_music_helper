@@ -8,4 +8,4 @@ ExampleName:
   search_unavailable_action_settings:
     telegram_bot_token: bot_token
     telegram_chat_id: chat_id
-    unavailable_song_upload_telegram: False
+    upload_zip_to_telegram: False
