@@ -1,7 +1,11 @@
 ExampleName:
-  auth_token:
-  playlist_owner_name:
+  auth_token: yandex_auth_token
+  playlist_owner_name: playlist_owner_name
   save_path: D:\music_test
-  telegram_bot_token: bot_token
-  telegram_chat_id: chat_id
-  unavailable_song_upload_telegram: False
+  download_action_settings:
+    logging:
+      file_exists: False
+  search_unavailable_action_settings:
+    telegram_bot_token: bot_token
+    telegram_chat_id: chat_id
+    unavailable_song_upload_telegram: False
