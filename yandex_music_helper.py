@@ -60,6 +60,7 @@ class YandexMusicHelper:
                 new_unavailable_tracks.append(track)
                 data.append((track, track_id, playlist_index, False))
         if new_unavailable_tracks:
+            telegram_chat_id = self.user_config['search_unavailable_action_settings']['telegram_chat_id']
             bot = telegram.Bot(self.user_config['search_unavailable_action_settings']['telegram_bot_token'])
             zip_path = None
             logging.info(f'Fetching done! Found {len(playlist_tracks)} new unavailable tracks.')
@@ -76,16 +77,15 @@ class YandexMusicHelper:
                 if len(message) > MAX_TELEGRAM_MESSAGE_LENGTH:
                     for x in range(0, len(message), MAX_TELEGRAM_MESSAGE_LENGTH):
                         await bot.send_message(text=message[x:x + MAX_TELEGRAM_MESSAGE_LENGTH],
-                                               chat_id=self.user_config['telegram_chat_id'])
+                                               chat_id=telegram_chat_id)
                 else:
 
                     await bot.send_message(text=message,
-                                           chat_id=self.user_config['telegram_chat_id'])
+                                           chat_id=telegram_chat_id)
                 if self.user_config['search_unavailable_action_settings'][
                     'upload_zip_to_telegram'] and zip_path:
                     for file in zip_path.rglob('*'):
-                        await bot.send_document(
-                            self.user_config['search_unavailable_action_settings']['telegram_chat_id'], document=file)
+                        await bot.send_document(telegram_chat_id, document=file)
                     shutil.rmtree(self.download_path)
                     shutil.rmtree(zip_path)
 
@@ -138,11 +138,16 @@ class YandexMusicHelper:
             logging.info(
                 f"Successfully downloaded: {len(success_downloaded)} out of {len(playlist_tracks)}. {exist_message}")
 
-    async def get_album(self, album_id: int, owner_name: str, search_unavailable=False) -> Tuple[str, Union[
-        List[Track], List[str]]]:
-        playlist = await call_function((await self.async_client).users_playlists, album_id, owner_name)
+    async def get_album(self, album_id: int, owner_name: str, is_playlist=True, search_unavailable=False) -> Tuple[
+        str, Union[
+            List[Track], List[str]]]:
+        if is_playlist:
+            data = await call_function((await self.async_client).users_playlists, album_id, owner_name)
+        else:
+            data = await (await self.async_client).albums(album_id)
+
         track_list = []
-        for track in playlist.tracks:
+        for track in data.tracks:
             full_track = await call_function(track.fetch_track_async)
             if full_track.available and not search_unavailable:
                 track_list.append(full_track)
@@ -150,7 +155,7 @@ class YandexMusicHelper:
                 track_name = self.get_track_fullname(full_track)
                 track_list.append((track_name, int(full_track.id)))
 
-        return playlist.title, track_list
+        return data.title, track_list
 
     @staticmethod
     def get_track_fullname(track: Track) -> str:
@@ -171,23 +176,29 @@ class YandexMusicHelper:
 
 
 async def async_main(params):
+    data_ids = params.playlists
     if params.action.lower() == "download":
         await asyncio.gather(
-            *(YandexMusicHelper(params).download_playlist(playlist) for playlist in params.playlists))
+            *(YandexMusicHelper(params).download_playlist(playlist) for playlist in data_ids))
     else:
         await asyncio.gather(
-            *(YandexMusicHelper(params).search_unavailable_songs(playlist) for playlist in params.playlists))
+            *(YandexMusicHelper(params).search_unavailable_songs(source) for source in data_ids))
 
 
 def get_parsed_args():
     parser = ArgumentParser(description='YandexMusic. Unavailable music finder')
-    parser.add_argument("-a", "--action", type=str, required=True,
+    parser.add_argument("-a", "--action", type=str, required=True, 
                         help='Select action [unavailable, download]')
     parser.add_argument("-u", "--username", type=str, required=True,
                         help='Username in configfile')
     parser.add_argument("-p", "--playlists", nargs="*", type=int, required=True,
-                        help='Playlists list')
-    return parser.parse_args()
+                        help='Playlists id')
+    parser.add_argument("-l", "--album", nargs="*", type=int, required=False,
+                        help='Album id')
+    result = parser.parse_args()
+    if result.album and result.playlists:
+        sys.exit("You can't download an album and a playlist at the same time, select one thing.")
+    return result
 
 
 if __name__ == '__main__':
